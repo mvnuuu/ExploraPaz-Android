@@ -3,35 +3,27 @@ package cl.duoc.mpazpro
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.Color
+import androidx.lifecycle.viewmodel.compose.viewModel
+import cl.duoc.mpazpro.navigation.AppNavigation
+import cl.duoc.mpazpro.repository.MPAZRepository
+import cl.duoc.mpazpro.viewmodel.MPAZViewModel
 
-/** Pantalla temporal del proyecto base. Se reemplaza en el bloque de integración. */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme { InicioTemporal() }
+            val repository = remember { MPAZRepository(applicationContext) }
+            val vm: MPAZViewModel = viewModel(factory = MPAZViewModel.factory(repository))
+            MaterialTheme(colorScheme = lightColorScheme(
+                primary = Color(0xFF285A64),
+                onPrimary = Color.White,
+                primaryContainer = Color(0xFFCBECED),
+                secondaryContainer = Color(0xFFF9E3B9)
+            )) { AppNavigation(vm) }
         }
-    }
-}
-
-@Composable
-private fun InicioTemporal() {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text("MPAZ PRO 2.º", style = MaterialTheme.typography.headlineMedium)
-        Text("Base de trabajo. Incorporar los bloques y la navegación final.")
     }
 }
