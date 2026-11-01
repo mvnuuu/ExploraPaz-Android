@@ -20,6 +20,8 @@ import java.util.Locale
 fun TeacherScreen(state: AppState, vm: MPAZViewModel, onReports: () -> Unit) {
     var chosenId by remember { mutableIntStateOf(0) }
     var savedId by remember { mutableIntStateOf(0) }
+    var noteUnitId by remember { mutableIntStateOf(0) }
+    var noteSavedId by remember { mutableIntStateOf(0) }
     val available = state.units.filter { it.status == UnitStatus.PUBLICADO }
     Page {
         Heading("Panel docente", "Curso de prueba: 2.º básico A · Estudiante EST-001")
@@ -36,6 +38,7 @@ fun TeacherScreen(state: AppState, vm: MPAZViewModel, onReports: () -> Unit) {
                     chosenId = unit.id
                     savedId = 0
                     vm.updateLimit((assignment?.maxAttempts ?: 2).toString())
+                    vm.updateDates(assignment?.startDate.orEmpty(), assignment?.endDate.orEmpty())
                 }, Modifier.fillMaxWidth()) {
                     Text(if (assignment == null) "Configurar asignación" else "Cambiar límite de intentos")
                 }
@@ -49,10 +52,28 @@ fun TeacherScreen(state: AppState, vm: MPAZViewModel, onReports: () -> Unit) {
                         singleLine = true,
                         trailingIcon = { Icon(Icons.Outlined.Edit, contentDescription = "Intentos") }
                     )
+                    Text("Disponibilidad opcional (AAAA-MM-DD)", style = MaterialTheme.typography.bodySmall)
+                    ValidationField(vm.startDate, "Disponible desde", vm.dateError, vm::updateStartDate)
+                    ValidationField(vm.endDate, "Disponible hasta", vm.dateError, vm::updateEndDate)
                     Button(onClick = { vm.assign(unit) { savedId = unit.id; chosenId = 0 } },
                         Modifier.fillMaxWidth()) { Text("Asignar a EST-001") }
                 }
                 AnimatedSuccess(savedId == unit.id, "Asignación guardada localmente")
+                OutlinedButton(onClick = {
+                    noteUnitId = unit.id
+                    noteSavedId = 0
+                    vm.beginNote(state.notes[unit.id].orEmpty())
+                }, Modifier.fillMaxWidth()) {
+                    Text("Agregar observación pedagógica")
+                }
+                if (noteUnitId == unit.id) {
+                    ValidationField(vm.noteDraft, "Observación del docente", vm.noteError,
+                        onValueChange = vm::updateNote, singleLine = false)
+                    Button(onClick = {
+                        vm.saveNote(unit.id) { noteSavedId = unit.id; noteUnitId = 0 }
+                    }, Modifier.fillMaxWidth()) { Text("Guardar observación") }
+                }
+                AnimatedSuccess(noteSavedId == unit.id, "Observación guardada")
             }
         }
         Text("Los cambios se guardan en este dispositivo. El prototipo no sincroniza varios teléfonos.",
@@ -82,6 +103,17 @@ fun ReportScreen(state: AppState) {
                     Text("Aciertos: ${p.correctCount} de ${p.attempts} · $percentage%")
                     LinearProgressIndicator(progress = { percentage / 100f }, Modifier.fillMaxWidth())
                     Text("Última respuesta: $date")
+                    Text("Detalle de respuestas", style = MaterialTheme.typography.titleSmall)
+                    if (p.history.isEmpty()) Text("Sin intentos registrados")
+                    p.history.forEachIndexed { index, attempt ->
+                        val choice = unit.choices.getOrNull(attempt.choice) ?: "No disponible"
+                        val correct = attempt.choice == unit.correctChoice
+                        val whenAnswered = SimpleDateFormat("dd-MM-yyyy HH:mm", Locale("es", "CL"))
+                            .format(Date(attempt.timestamp))
+                        Text("Intento ${index + 1}: $choice · ${if (correct) "Correcta" else "Incorrecta"} · $whenAnswered")
+                    }
+                    val observation = state.notes[unit.id].orEmpty()
+                    Text("Observación docente: ${if (observation.isBlank()) "Pendiente" else observation}")
                     Text("Interpretación y observaciones pedagógicas: a cargo del docente")
                 }
             }
