@@ -3,6 +3,7 @@ package cl.duoc.mpazpro.navigation
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -19,7 +20,7 @@ fun AppNavigation(vm: MPAZViewModel) {
     val nav = rememberNavController()
     val state by vm.state.collectAsState()
     // Prototipo local: control de acceso a vistas, no autenticación institucional.
-    var role by remember { mutableStateOf("") }
+    var role by rememberSaveable { mutableStateOf("") }
     val current by nav.currentBackStackEntryAsState()
     val onHome = current?.destination?.route == "home"
 
@@ -35,7 +36,9 @@ fun AppNavigation(vm: MPAZViewModel) {
             })
     }) { padding ->
         if (!state.loaded) {
-            Page { CircularProgressIndicator(); Text("Cargando progreso local...") }
+            Box(Modifier.padding(padding)) {
+                Page { CircularProgressIndicator(); Text("Cargando progreso local...") }
+            }
         } else {
             NavHost(navController = nav, startDestination = "home", modifier = Modifier.padding(padding)) {
                 composable("home") {
@@ -83,7 +86,10 @@ fun AppNavigation(vm: MPAZViewModel) {
                 composable("result/{unitId}") { entry ->
                     if (role == "student") {
                         val id = entry.arguments?.getString("unitId")?.toIntOrNull() ?: -1
-                        ResultScreen(state.units.firstOrNull { it.id == id }, state) {
+                        val unit = state.units.firstOrNull { it.id == id }
+                        if (unit == null || state.assignment(id) == null || state.progress(id).lastChoice < 0) {
+                            Restricted()
+                        } else ResultScreen(unit, state) {
                             nav.navigate("student") { popUpTo("student") { inclusive = true } }
                         }
                     } else Restricted()

@@ -20,6 +20,7 @@ fun UTPScreen(state: AppState, vm: MPAZViewModel, onEdit: (Int) -> Unit, onNew: 
     Page {
         Heading("Administración UTP", "Autoriza los contenidos antes de que el docente pueda asignarlos.")
         Button(onClick = { vm.beginNew(); onNew() }, Modifier.fillMaxWidth()) { Text("Crear unidad didáctica") }
+        AnimatedSuccess(vm.lastSavedTitle.isNotBlank(), "Unidad guardada: ${vm.lastSavedTitle}")
         state.units.forEach { unit ->
             UnitCard(unit) {
                 OutlinedButton(onClick = { vm.beginEdit(unit); onEdit(unit.id) }, Modifier.fillMaxWidth()) {
