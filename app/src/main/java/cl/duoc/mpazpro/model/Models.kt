@@ -27,7 +27,11 @@ data class DidacticUnit(
     val status: UnitStatus = UnitStatus.BORRADOR
 )
 
-data class Assignment(val unitId: Int, val maxAttempts: Int, val assigned: Boolean)
+data class Assignment(val unitId: Int, val maxAttempts: Int, val assigned: Boolean,
+    val startDate: String = "", val endDate: String = "")
+
+/** Historial ficticio de preguntas respondidas, sin IA ni servidores. */
+data class AttemptRecord(val timestamp: Long, val choice: Int)
 
 data class Progress(
     val unitId: Int,
@@ -35,14 +39,16 @@ data class Progress(
     val attempts: Int,
     val correctCount: Int,
     val lastChoice: Int,
-    val lastEpoch: Long
+    val lastEpoch: Long,
+    val history: List<AttemptRecord> = emptyList()
 )
 
 data class AppState(
     val loaded: Boolean = false,
     val units: List<DidacticUnit> = emptyList(),
     val assignments: List<Assignment> = emptyList(),
-    val progress: List<Progress> = emptyList()
+    val progress: List<Progress> = emptyList(),
+    val notes: Map<Int, String> = emptyMap()
 ) {
     fun assignment(id: Int): Assignment? = assignments.firstOrNull { it.unitId == id && it.assigned }
     fun progress(id: Int): Progress = progress.firstOrNull { it.unitId == id } ?: Progress(id, false, 0, 0, -1, 0L)

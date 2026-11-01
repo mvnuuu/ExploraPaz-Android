@@ -55,13 +55,24 @@ class MPAZRepository(private val context: Context) {
             loaded = true,
             units = units,
             assignments = ids.map { id ->
-                Assignment(id, p[i(id, "max_attempts")] ?: 2, p[b(id, "assigned")] ?: false)
+                Assignment(id, p[i(id, "max_attempts")] ?: 2, p[b(id, "assigned")] ?: false,
+                    p[s(id, "start_date")].orEmpty(), p[s(id, "end_date")].orEmpty())
             },
             progress = ids.map { id ->
+                val history = p[s(id, "history")].orEmpty().split(";").mapNotNull { record ->
+                    val parts = record.split(":")
+                    if (parts.size != 2) null else {
+                        val timestamp = parts[0].toLongOrNull()
+                        val choice = parts[1].toIntOrNull()
+                        if (timestamp == null || choice == null || choice !in 0..3) null
+                        else AttemptRecord(timestamp, choice)
+                    }
+                }
                 Progress(id, p[b(id, "read")] ?: false, p[i(id, "attempts")] ?: 0,
                     p[i(id, "correct_count")] ?: 0, p[i(id, "last_choice")] ?: -1,
-                    p[l(id, "last_epoch")] ?: 0L)
-            }
+                    p[l(id, "last_epoch")] ?: 0L, history)
+            },
+            notes = ids.associateWith { id -> p[s(id, "teacher_note")].orEmpty() }
         )
     }
 
@@ -89,15 +100,21 @@ class MPAZRepository(private val context: Context) {
         store.edit { p -> p[s(id, "status")] = status.name }
     }
 
-    suspend fun assign(id: Int, attempts: Int) {
+    suspend fun assign(id: Int, attempts: Int, startDate: String, endDate: String) {
         store.edit { p ->
             p[b(id, "assigned")] = true
             p[i(id, "max_attempts")] = attempts
+            p[s(id, "start_date")] = startDate
+            p[s(id, "end_date")] = endDate
         }
     }
 
     suspend fun markRead(id: Int) {
         store.edit { p -> p[b(id, "read")] = true }
+    }
+
+    suspend fun saveTeacherNote(id: Int, note: String) {
+        store.edit { p -> p[s(id, "teacher_note")] = note }
     }
 
     suspend fun recordAttempt(id: Int, choice: Int, correct: Boolean): Boolean {
@@ -114,7 +131,10 @@ class MPAZRepository(private val context: Context) {
                 p[i(id, "attempts")] = used + 1
                 if (correct) p[i(id, "correct_count")] = (p[i(id, "correct_count")] ?: 0) + 1
                 p[i(id, "last_choice")] = choice
-                p[l(id, "last_epoch")] = System.currentTimeMillis()
+                val now = System.currentTimeMillis()
+                p[l(id, "last_epoch")] = now
+                val earlier = p[s(id, "history")].orEmpty()
+                p[s(id, "history")] = if (earlier.isBlank()) "$now:$choice" else "$earlier;$now:$choice"
                 saved = true
             }
         }

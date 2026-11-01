@@ -9,19 +9,42 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import cl.duoc.mpazpro.model.*
 import cl.duoc.mpazpro.repository.MPAZRepository
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /** Toda validación y toda operación con datos se gestiona fuera de los composables. */
 class MPAZViewModel(private val repository: MPAZRepository) : ViewModel() {
-    val state = repository.state.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AppState())
+    // Guía 11: MutableStateFlow compartido entre pantallas y collectAsState en Compose.
+    private val _state = MutableStateFlow(AppState())
+    val state = _state.asStateFlow()
+    init { viewModelScope.launch { repository.state.collect { _state.value = it } } }
+
+    private var attemptedSave by mutableStateOf(false)
+    private var attemptedNote by mutableStateOf(false)
+
+    var noteDraft by mutableStateOf("")
+        private set
+    var noteError by mutableStateOf("")
+        private set
+    var lastSavedTitle by mutableStateOf("")
+        private set
 
     var form by mutableStateOf(UnitForm())
         private set
     var errors by mutableStateOf(UnitErrors())
         private set
     var assignmentLimit by mutableStateOf("2")
+        private set
+    var startDate by mutableStateOf("")
+        private set
+    var endDate by mutableStateOf("")
+        private set
+    var dateError by mutableStateOf("")
         private set
     var assignmentError by mutableStateOf("")
         private set
@@ -30,12 +53,32 @@ class MPAZViewModel(private val repository: MPAZRepository) : ViewModel() {
     var quizError by mutableStateOf("")
         private set
 
-    fun beginNew() { form = UnitForm(); errors = UnitErrors(); mediaError = "" }
-    fun beginEdit(unit: DidacticUnit) { form = UnitForm.from(unit); errors = UnitErrors(); mediaError = "" }
-    fun updateForm(newValue: UnitForm) { form = newValue; errors = UnitErrors() }
+    fun beginNew() { form = UnitForm(); errors = UnitErrors(); mediaError = ""; attemptedSave = false }
+    fun beginEdit(unit: DidacticUnit) {
+        form = UnitForm.from(unit); errors = UnitErrors(); mediaError = ""; attemptedSave = false
+    }
+    fun updateForm(newValue: UnitForm) {
+        form = newValue
+        // Tras el primer intento de guardado, cada cambio revalida todos los campos.
+        // No se borran errores que todavía siguen presentes.
+        if (attemptedSave) validateUnit()
+    }
     fun updateLimit(text: String) { assignmentLimit = text; assignmentError = "" }
+    fun updateDates(from: String, to: String) { startDate = from; endDate = to; dateError = "" }
+    fun updateStartDate(text: String) { startDate = text; dateError = "" }
+    fun updateEndDate(text: String) { endDate = text; dateError = "" }
+
+    private fun dateIsValid(text: String): Boolean {
+        if (!text.matches(Regex("""\d{4}-\d{2}-\d{2}"""))) return false
+        return try {
+            val formatter = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT)
+            formatter.isLenient = false
+            formatter.parse(text) != null
+        } catch (_: Exception) { false }
+    }
 
     fun validateUnit(): Boolean {
+        attemptedSave = true
         val f = form
         val alternatives = listOf(f.choice1, f.choice2, f.choice3, f.choice4).map { it.trim() }
         errors = UnitErrors(
@@ -59,7 +102,32 @@ class MPAZViewModel(private val repository: MPAZRepository) : ViewModel() {
         val newId = if (form.id != 0) form.id else (state.value.units.maxOfOrNull { it.id } ?: 0) + 1
         // Modificar una unidad publicada vuelve a borrador, obligando nueva autorización.
         val unit = form.copy(id = newId).toUnit(UnitStatus.BORRADOR)
-        viewModelScope.launch { repository.saveUnit(unit); onSuccess() }
+        viewModelScope.launch {
+            repository.saveUnit(unit)
+            lastSavedTitle = unit.title
+            onSuccess()
+        }
+    }
+
+    fun clearSavedFeedback() { lastSavedTitle = "" }
+
+    fun beginNote(existing: String) {
+        noteDraft = existing
+        noteError = ""
+        attemptedNote = false
+    }
+    fun updateNote(text: String) {
+        noteDraft = text
+        if (attemptedNote) noteError = validateNote(text)
+    }
+    private fun validateNote(text: String): String =
+        if (text.trim().length < 10) "La observación debe tener 10 caracteres o más" else ""
+
+    fun saveNote(id: Int, onSuccess: () -> Unit) {
+        attemptedNote = true
+        noteError = validateNote(noteDraft)
+        if (noteError.isNotBlank()) return
+        viewModelScope.launch { repository.saveTeacherNote(id, noteDraft.trim()); onSuccess() }
     }
 
     fun authorize(unit: DidacticUnit) {
@@ -85,12 +153,24 @@ class MPAZViewModel(private val repository: MPAZRepository) : ViewModel() {
             count == null || count !in 1..5 -> "Los intentos deben estar entre 1 y 5"
             else -> ""
         }
-        if (assignmentError.isNotEmpty() || count == null) return
-        viewModelScope.launch { repository.assign(unit.id, count); onSuccess() }
+        dateError = when {
+            startDate.isBlank() && endDate.isBlank() -> ""
+            !dateIsValid(startDate) || !dateIsValid(endDate) -> "Completa ambas fechas válidas AAAA-MM-DD"
+            startDate > endDate -> "La fecha inicial debe ser anterior a la final"
+            else -> ""
+        }
+        if (assignmentError.isNotEmpty() || dateError.isNotEmpty() || count == null) return
+        viewModelScope.launch { repository.assign(unit.id, count, startDate, endDate); onSuccess() }
     }
 
-    fun canStudentOpen(id: Int): Boolean = state.value.units.any { it.id == id && it.status == UnitStatus.PUBLICADO }
-        && state.value.assignment(id) != null
+    fun canStudentOpen(id: Int): Boolean {
+        val unit = state.value.units.firstOrNull { it.id == id } ?: return false
+        val assignment = state.value.assignment(id) ?: return false
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date())
+        return unit.status == UnitStatus.PUBLICADO &&
+            (assignment.startDate.isBlank() || today >= assignment.startDate) &&
+            (assignment.endDate.isBlank() || today <= assignment.endDate)
+    }
 
     fun markRead(id: Int) {
         if (!canStudentOpen(id)) return
